@@ -1,16 +1,9 @@
-
 name: Build ANIUX AI Admin Phu APK
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - 'app/**'
-      - '*.gradle'
-      - 'settings.gradle'
-      - 'gradle.properties'
-      - '.github/workflows/build-apk.yml'
 
 permissions:
   contents: read
@@ -32,7 +25,6 @@ jobs:
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
-          log-accepted-android-sdk-licenses: 'false'
 
       - name: Install Android platform and build tools
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
@@ -42,12 +34,41 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Find Android project root
+        shell: bash
+        run: |
+          if [[ -f settings.gradle || -f settings.gradle.kts ]]; then
+            project_dir='.'
+          elif [[ -f ANIUX-AI-Admin-Phu/settings.gradle || -f ANIUX-AI-Admin-Phu/settings.gradle.kts ]]; then
+            project_dir='ANIUX-AI-Admin-Phu'
+          else
+            project_file="$(find . -mindepth 2 -maxdepth 5 -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+            if [[ -z "$project_file" ]]; then
+              echo 'ERROR: Không tìm thấy settings.gradle. Bạn cần tải cả mã nguồn Android (app/, settings.gradle, build.gradle) lên repository, không chỉ file workflow.'
+              echo 'Repository root contents:'
+              ls -la
+              exit 1
+            fi
+            project_dir="$(dirname "$project_file")"
+          fi
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+          echo "Android project root: $project_dir"
+
+      - name: Verify Android project files
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          test -f settings.gradle -o -f settings.gradle.kts
+          test -f build.gradle -o -f build.gradle.kts
+          test -f app/build.gradle -o -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+
       - name: Build debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
         run: gradle --no-daemon assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: ANIUX-AI-Admin-Phu-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
