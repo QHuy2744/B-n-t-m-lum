@@ -12,63 +12,63 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
+      - name: Find and extract valid Android source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Use a ZIP that is larger than the 2-byte placeholder currently in the repo.
+          zip_file="$(find . -maxdepth 2 -type f -iname '*.zip' -size +100k -print -quit)"
+          if [[ -z "$zip_file" ]]; then
+            echo 'ERROR: Không tìm thấy ZIP mã nguồn hợp lệ (>100 KB). Hãy tải ANIUX-AI-Admin-Phu-source-corrected.zip từ cuộc trò chuyện rồi upload lên repo.'
+            echo 'Các file ZIP hiện có:'
+            find . -maxdepth 2 -type f -iname '*.zip' -exec ls -lh {} \; || true
+            exit 1
+          fi
+          echo "Found source archive: $zip_file"
+          unzip -t "$zip_file"
+          mkdir -p _android_source
+          unzip -q "$zip_file" -d _android_source
+          settings_file="$(find _android_source -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
+          if [[ -z "$settings_file" ]]; then
+            echo 'ERROR: ZIP giải nén được nhưng không có settings.gradle.'
+            find _android_source -maxdepth 4 -type f -print
+            exit 1
+          fi
+          project_dir="$(dirname "$settings_file")"
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+          echo "Android project root: $project_dir"
+          test -f "$project_dir/build.gradle" -o -f "$project_dir/build.gradle.kts"
+          test -f "$project_dir/app/build.gradle" -o -f "$project_dir/app/build.gradle.kts"
+          test -f "$project_dir/app/src/main/AndroidManifest.xml"
+
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: 'platform-tools'
 
-      - name: Install Android platform and build tools
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Install Android SDK packages
+        run: sdkmanager 'platform-tools' 'platforms;android-35' 'build-tools;35.0.0'
 
-      - name: Setup Gradle
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-
-      - name: Find Android project root
-        shell: bash
-        run: |
-          if [[ -f settings.gradle || -f settings.gradle.kts ]]; then
-            project_dir='.'
-          elif [[ -f ANIUX-AI-Admin-Phu/settings.gradle || -f ANIUX-AI-Admin-Phu/settings.gradle.kts ]]; then
-            project_dir='ANIUX-AI-Admin-Phu'
-          else
-            project_file="$(find . -mindepth 2 -maxdepth 5 -type f \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
-            if [[ -z "$project_file" ]]; then
-              echo 'ERROR: Không tìm thấy settings.gradle. Bạn cần tải cả mã nguồn Android (app/, settings.gradle, build.gradle) lên repository, không chỉ file workflow.'
-              echo 'Repository root contents:'
-              ls -la
-              exit 1
-            fi
-            project_dir="$(dirname "$project_file")"
-          fi
-          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
-          echo "Android project root: $project_dir"
-
-      - name: Verify Android project files
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          test -f settings.gradle -o -f settings.gradle.kts
-          test -f build.gradle -o -f build.gradle.kts
-          test -f app/build.gradle -o -f app/build.gradle.kts
-          test -f app/src/main/AndroidManifest.xml
 
       - name: Build debug APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: gradle --no-daemon assembleDebug
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: ANIUX-AI-Admin-Phu-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          
